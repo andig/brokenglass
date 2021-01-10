@@ -5,6 +5,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -27,6 +31,10 @@ var (
 	hostKeyPath = flag.String("host_key",
 		"/perm/breakglass.host_key",
 		"path to a PEM-encoded RSA, DSA or ECDSA private key (create using e.g. ssh-keygen -f /perm/breakglass.host_key -N '' -t rsa)")
+
+	hostPasswordPath = flag.String("host_password",
+		"/etc/gokr-pw.txt",
+		"path to host password")
 )
 
 func loadAuthorizedKeys(path string) (map[string]bool, error) {
@@ -64,36 +72,88 @@ func loadHostKey(path string) (ssh.Signer, error) {
 	return ssh.ParsePrivateKey(b)
 }
 
+func createHostKey(path string) (ssh.Signer, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		return nil, err
+	}
+
+	file, err := os.OpenFile(path, os.O_CREATE, 0400)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	err = pem.Encode(file, &pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+
+	var signer ssh.Signer
+	if err == nil {
+		signer, err = ssh.NewSignerFromKey(key)
+	}
+
+	return signer, err
+}
+
+func loadPassword(path string) ([]byte, error) {
+	b, err := ioutil.ReadFile(path)
+	return bytes.TrimSpace(b), err
+}
+
 func main() {
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	gokrazy.DontStartOnBoot()
+	config := &ssh.ServerConfig{}
 
 	authorizedKeys, err := loadAuthorizedKeys(*authorizedKeysPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("see https://github.com/gokrazy/breakglass#installation")
-		}
-		log.Fatal(err)
-	}
-
-	config := &ssh.ServerConfig{
-		PublicKeyCallback: func(conn ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+	if err == nil {
+		// pubkey auth
+		log.Printf("authorized keys found - using pubkey authorization")
+		config.PublicKeyCallback = func(conn ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 			if authorizedKeys[string(pubKey.Marshal())] {
 				log.Printf("user %q successfully authorized from remote addr %s", conn.User(), conn.RemoteAddr())
 				return nil, nil
 			}
 			return nil, fmt.Errorf("public key not found in %s", *authorizedKeysPath)
-		},
+		}
+	} else {
+		// terminal error
+		if !os.IsNotExist(err) {
+			log.Printf("see https://github.com/gokrazy/breakglass#installation")
+			log.Fatalf("could not load authorized keys: %v", err)
+		}
+
+		hostPassword, errPass := loadPassword(*hostPasswordPath)
+		if errPass != nil {
+			log.Fatalf("could not load either authorized keys (%v) or host password (%v)", err, errPass)
+		}
+
+		// password auth
+		log.Printf("authorized keys not found - falling back to password authorization")
+		config.PasswordCallback = func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+			if bytes.Compare(hostPassword, password) == 0 {
+				log.Printf("user %q successfully authorized from remote addr %s", conn.User(), conn.RemoteAddr())
+				return nil, nil
+			}
+			return nil, fmt.Errorf("public key not found in %s", *authorizedKeysPath)
+		}
 	}
 
 	signer, err := loadHostKey(*hostKeyPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if !os.IsNotExist(err) {
 			log.Printf("see https://github.com/gokrazy/breakglass#installation")
+			log.Fatalf("could not load host keys: %v", err)
 		}
-		log.Fatal(err)
+
+		log.Fatalf("host key not found, creating initial host key", err)
+		signer, err = createHostKey(*hostKeyPath)
+		if err != nil {
+			log.Fatalf("could not load create host key: %v", err)
+		}
 	}
 	config.AddHostKey(signer)
 
