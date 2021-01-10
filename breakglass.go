@@ -158,7 +158,7 @@ func main() {
 	}
 	config.AddHostKey(signer)
 
-	unpackDir, err := ioutil.TempDir("", "breakglass")
+	unpackDir, err := ioutil.TempDir("", "brokenglass")
 	if err != nil {
 		log.Fatal(err)
 	}
