@@ -132,7 +132,7 @@ func main() {
 		}
 
 		// password auth
-		log.Printf("authorized keys not found - falling back to password authorization")
+		log.Println("authorized keys not found - falling back to password authorization")
 		config.PasswordCallback = func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 			if bytes.Compare(hostPassword, password) == 0 {
 				log.Printf("user %q successfully authorized from remote addr %s", conn.User(), conn.RemoteAddr())
@@ -149,7 +149,8 @@ func main() {
 			log.Fatalf("could not load host keys: %v", err)
 		}
 
-		log.Fatalf("host key not found, creating initial host key", err)
+		// create host key
+		log.Println("host key not found, creating initial host key")
 		signer, err = createHostKey(*hostKeyPath)
 		if err != nil {
 			log.Fatalf("could not load create host key: %v", err)
