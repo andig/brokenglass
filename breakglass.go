@@ -69,6 +69,10 @@ func loadHostKey(path string) (ssh.Signer, error) {
 		return nil, err
 	}
 
+	if b = bytes.TrimSpace(b); len(b) == 0 {
+		return nil, os.ErrNotExist
+	}
+
 	return ssh.ParsePrivateKey(b)
 }
 
@@ -142,7 +146,6 @@ func main() {
 	signer, err := loadHostKey(*hostKeyPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("see https://github.com/gokrazy/breakglass#installation")
 			log.Fatalf("could not load host keys: %v", err)
 		}
 
