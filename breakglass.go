@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -34,8 +36,6 @@ var (
 		"/etc/gokr-pw.txt",
 		"path to host password")
 )
-
-const hostKeyFallbackPath = "/perm/breakglass.host_key"
 
 func loadAuthorizedKeys(path string) (map[string]bool, error) {
 	b, err := ioutil.ReadFile(path)
@@ -78,23 +78,20 @@ func createHostKey(path string) (ssh.Signer, error) {
 		return nil, err
 	}
 
-	// file, err := os.OpenFile(path, os.O_CREATE, 0400)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// defer file.Close()
-
-	// err = pem.Encode(file, &pem.Block{
-	// 	Type:  "PRIVATE KEY",
-	// 	Bytes: x509.MarshalPKCS1PrivateKey(key),
-	// })
-
-	var signer ssh.Signer
+	file, err := os.OpenFile(path, os.O_CREATE, 0400)
 	if err == nil {
-		signer, err = ssh.NewSignerFromKey(key)
+		defer file.Close()
+
+		err = pem.Encode(file, &pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(key),
+		})
+	}
+	if err != nil {
+		log.Printf("saving generated host key failed: %v", err)
 	}
 
-	return signer, err
+	return ssh.NewSignerFromKey(key)
 }
 
 func loadPassword(path string) ([]byte, error) {
