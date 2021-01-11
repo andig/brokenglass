@@ -69,10 +69,6 @@ func loadHostKey(path string) (ssh.Signer, error) {
 		return nil, err
 	}
 
-	if b = bytes.TrimSpace(b); len(b) == 0 {
-		return nil, os.ErrNotExist
-	}
-
 	return ssh.ParsePrivateKey(b)
 }
 
@@ -86,10 +82,13 @@ func createHostKey(path string) (ssh.Signer, error) {
 	if err == nil {
 		defer file.Close()
 
-		err = pem.Encode(file, &pem.Block{
-			Type:  "PRIVATE KEY",
-			Bytes: x509.MarshalPKCS1PrivateKey(key),
-		})
+		var pkcs8 []byte
+		if pkcs8, err = x509.MarshalPKCS8PrivateKey(key); err == nil {
+			err = pem.Encode(file, &pem.Block{
+				Type:  "PRIVATE KEY",
+				Bytes: pkcs8,
+			})
+		}
 	}
 	if err != nil {
 		log.Printf("saving generated host key failed: %v", err)
@@ -123,8 +122,8 @@ func main() {
 	} else {
 		// terminal error
 		if !os.IsNotExist(err) {
-			log.Printf("see https://github.com/gokrazy/breakglass#installation")
-			log.Fatalf("could not load authorized keys: %v", err)
+			log.Printf("could not load authorized keys: %v", err)
+			log.Fatalf("see https://github.com/gokrazy/breakglass#installation")
 		}
 
 		hostPassword, errPass := loadPassword(*hostPasswordPath)
@@ -146,7 +145,8 @@ func main() {
 	signer, err := loadHostKey(*hostKeyPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Fatalf("could not load host keys: %v", err)
+			log.Printf("could not load host keys: %v", err)
+			log.Fatalf("see https://github.com/gokrazy/breakglass#installation")
 		}
 
 		// create host key
