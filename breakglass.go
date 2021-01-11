@@ -82,7 +82,7 @@ func createHostKey(path string) (ssh.Signer, error) {
 		return nil, err
 	}
 
-	file, err := os.OpenFile(path, os.O_CREATE, 0400)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0400)
 	if err == nil {
 		defer file.Close()
 
