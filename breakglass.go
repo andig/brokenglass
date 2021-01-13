@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -20,7 +21,8 @@ import (
 
 	"github.com/gokrazy/gokrazy"
 
-	"golang.org/x/crypto/ssh"
+	"github.com/gliderlabs/ssh"
+	gossh "golang.org/x/crypto/ssh"
 )
 
 var (
@@ -69,7 +71,7 @@ func loadHostKey(path string) (ssh.Signer, error) {
 		return nil, err
 	}
 
-	return ssh.ParsePrivateKey(b)
+	return gossh.ParsePrivateKey(b)
 }
 
 func createHostKey(path string) (ssh.Signer, error) {
@@ -94,7 +96,7 @@ func createHostKey(path string) (ssh.Signer, error) {
 		log.Printf("saving generated host key failed: %v", err)
 	}
 
-	return ssh.NewSignerFromKey(key)
+	return gossh.NewSignerFromKey(key)
 }
 
 func loadPassword(path string) ([]byte, error) {
@@ -106,13 +108,13 @@ func main() {
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	config := &ssh.ServerConfig{}
+	config := &gossh.ServerConfig{}
 
 	authorizedKeys, err := loadAuthorizedKeys(*authorizedKeysPath)
 	if err == nil {
 		// pubkey auth
 		log.Printf("authorized keys found - using pubkey authorization")
-		config.PublicKeyCallback = func(conn ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+		config.PublicKeyCallback = func(conn gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
 			if authorizedKeys[string(pubKey.Marshal())] {
 				log.Printf("user %q successfully authorized from remote addr %s", conn.User(), conn.RemoteAddr())
 				return nil, nil
@@ -133,7 +135,7 @@ func main() {
 
 		// password auth
 		log.Println("authorized keys not found - falling back to password authorization")
-		config.PasswordCallback = func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+		config.PasswordCallback = func(conn gossh.ConnMetadata, password []byte) (*gossh.Permissions, error) {
 			if bytes.Compare(hostPassword, password) == 0 {
 				log.Printf("user %q successfully authorized from remote addr %s", conn.User(), conn.RemoteAddr())
 				return nil, nil
@@ -180,34 +182,33 @@ func main() {
 		log.Fatal(err)
 	}
 
-	accept := func(listener net.Listener) {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				log.Printf("accept: %v", err)
-				continue
-			}
-
-			go func(conn net.Conn) {
-				_, chans, reqs, err := ssh.NewServerConn(conn, config)
-				if err != nil {
-					log.Printf("handshake: %v", err)
-					return
-				}
-
-				// discard all out of band requests
-				go ssh.DiscardRequests(reqs)
-
-				for newChannel := range chans {
-					handleChannel(newChannel)
-				}
-			}(conn)
-		}
-	}
-
 	addrs, err := gokrazy.PrivateInterfaceAddrs()
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	forwardHandler := &ssh.ForwardedTCPHandler{}
+
+	server := ssh.Server{
+		ServerConfigCallback: func(ctx ssh.Context) *gossh.ServerConfig {
+			return config
+		},
+		Handler: ssh.Handler(func(s ssh.Session) {
+			io.WriteString(s, "Remote forwarding available...\n")
+			select {}
+		}),
+		LocalPortForwardingCallback: ssh.LocalPortForwardingCallback(func(ctx ssh.Context, dhost string, dport uint32) bool {
+			log.Println("Accepted forward", dhost, dport)
+			return true
+		}),
+		ReversePortForwardingCallback: ssh.ReversePortForwardingCallback(func(ctx ssh.Context, host string, port uint32) bool {
+			log.Println("attempt to bind", host, port, "granted")
+			return true
+		}),
+		RequestHandlers: map[string]ssh.RequestHandler{
+			"tcpip-forward":        forwardHandler.HandleSSHRequest,
+			"cancel-tcpip-forward": forwardHandler.HandleSSHRequest,
+		},
 	}
 
 	for _, addr := range addrs {
@@ -216,11 +217,12 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+
 		fmt.Printf("listening on %s\n", hostport)
-		go accept(listener)
+		go server.Serve(listener)
 	}
 
-	fmt.Printf("host key fingerprint: %s\n", ssh.FingerprintSHA256(signer.PublicKey()))
+	fmt.Printf("host key fingerprint: %s\n", gossh.FingerprintSHA256(signer.PublicKey()))
 
 	select {}
 }
