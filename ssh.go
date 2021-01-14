@@ -52,7 +52,6 @@ func handleTCPIP(newChan ssh.NewChannel) {
 		return
 	}
 
-	newChan.Reject(ssh.Prohibited, "port forwarding is disabled")
 	if !forwardingAllowed(d.DestAddr, d.DestPort) {
 		newChan.Reject(ssh.Prohibited, "port forwarding is disabled")
 		return
