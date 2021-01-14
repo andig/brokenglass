@@ -35,6 +35,10 @@ var (
 	hostPasswordPath = flag.String("host_password",
 		"/etc/gokr-pw.txt",
 		"path to host password")
+
+	startup = flag.Bool("startup",
+		false,
+		"start when device starts")
 )
 
 func loadAuthorizedKeys(path string) (map[string]bool, error) {
@@ -105,6 +109,10 @@ func loadPassword(path string) ([]byte, error) {
 func main() {
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	if !*startup {
+		gokrazy.DontStartOnBoot()
+	}
 
 	config := &ssh.ServerConfig{}
 
